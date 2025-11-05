@@ -1,13 +1,34 @@
-const MASTER_IP = "192.168.4.1";
+// Import Firebase modules
+import { initializeApp } from "https://www.gstatic.com/firebasejs/9.6.10/firebase-app.js";
+import { getDatabase, ref, set, onValue, get, child } from "https://www.gstatic.com/firebasejs/9.6.10/firebase-database.js";
 
-async function fetchSlaves() {
-  try {
-    const res = await fetch(`http://${MASTER_IP}/json`);
-    const data = await res.json();
-    displaySlaves(data);
-  } catch (err) {
-    console.error("Error fetching slave data:", err);
-  }
+// ====== FIREBASE CONFIGURATION ======
+// ⚠️ Replace all values below with your Firebase project's actual credentials
+const firebaseConfig = {
+  apiKey: "AIzaSyBtVI6cUmGCkN4fejlr4gxnsZdnswGSYR4",
+  authDomain: "esp-dashboard-50f8b.firebaseapp.com",
+  databaseURL: "https://esp-dashboard-50f8b-default-rtdb.firebaseio.com",
+  projectId: "esp-dashboard-50f8b",
+  storageBucket: "esp-dashboard-50f8b.firebasestorage.app",
+  messagingSenderId: "849745049499",
+  appId: "1:849745049499:web:c392ba3766f62b812a133e"
+};
+
+// Initialize Firebase app and database
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
+
+// ====== FETCH & DISPLAY SLAVE DATA ======
+function fetchSlavesFromFirebase() {
+  const slavesRef = ref(db, "slaves");
+  onValue(slavesRef, (snapshot) => {
+    if (snapshot.exists()) {
+      const slaves = snapshot.val();
+      displaySlaves(Object.values(slaves));
+    } else {
+      displaySlaves([]);
+    }
+  });
 }
 
 function displaySlaves(slaves) {
@@ -49,27 +70,45 @@ function displaySlaves(slaves) {
   });
 }
 
+// ====== TOGGLE SLAVE PIN ======
 async function toggleSlave(id, pin) {
-  try {
-    await fetch(`http://${MASTER_IP}/toggle_slave?id=${id}&pin=${pin}`);
-    setTimeout(fetchSlaves, 300);
-  } catch (err) {
-    console.error("Error toggling slave:", err);
-  }
+  const commandRef = ref(db, `commands/slaves/${id}/gpio${pin}`);
+  const currentSnapshot = await get(commandRef);
+  const currentVal = currentSnapshot.exists() ? currentSnapshot.val() : 0;
+  const newValue = currentVal === 1 ? 0 : 1;
+  await set(commandRef, newValue);
+  console.log(`Toggled Slave ${id} GPIO${pin} → ${newValue}`);
 }
 
+// ====== TOGGLE MASTER PIN ======
 async function toggleMaster(pin) {
   const btn = document.getElementById(`gpio${pin}`);
   btn.classList.toggle("on");
   btn.classList.toggle("off");
 
-  try {
-    await fetch(`http://${MASTER_IP}/toggle?pin=${pin}`);
-  } catch (err) {
-    console.error("Error toggling master pin:", err);
-  }
+  const commandRef = ref(db, `commands/master/gpio${pin}`);
+  const currentSnapshot = await get(commandRef);
+  const currentVal = currentSnapshot.exists() ? currentSnapshot.val() : 0;
+  const newValue = currentVal === 1 ? 0 : 1;
+  await set(commandRef, newValue);
+  console.log(`Toggled Master GPIO${pin} → ${newValue}`);
 }
 
-setInterval(fetchSlaves, 1000);
-window.onload = fetchSlaves;
+// ====== LISTEN FOR STATUS UPDATES FROM MASTER ======
+const masterStatusRef = ref(db, "status/master");
+onValue(masterStatusRef, (snapshot) => {
+  if (snapshot.exists()) {
+    const data = snapshot.val();
+    Object.keys(data).forEach(key => {
+      const pin = key.replace("gpio", "");
+      const btn = document.getElementById(`gpio${pin}`);
+      if (btn) {
+        btn.classList.toggle("on", data[key] === 1);
+        btn.classList.toggle("off", data[key] === 0);
+      }
+    });
+  }
+});
 
+// ====== INITIAL LOAD ======
+window.onload = fetchSlavesFromFirebase;
